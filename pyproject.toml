@@ -1,0 +1,19 @@
+[project]
+name = "kinesis-to-s3-lambda"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Rajesh Kumar", email = "rajeshku9560@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "boto3>=1.43.108",
+]
+
+[project.scripts]
+kinesis-to-s3-lambda = "kinesis_to_s3_lambda:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
