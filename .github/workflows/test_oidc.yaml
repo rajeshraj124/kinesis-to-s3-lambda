@@ -1,0 +1,26 @@
+name: Test AWS OIDC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Who am I
+        run: aws sts get-caller-identity
+
+      - name: Check ECR access
+        run: aws ecr describe-repositories --region "${{ vars.AWS_REGION }}" || true
+
+      - name: Check Lambda access
+        run: aws lambda list-functions --region "${{ vars.AWS_REGION }}" --max-items 1 || true
