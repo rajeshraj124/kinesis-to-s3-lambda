@@ -19,6 +19,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate required variables
+        run: |
+          for v in AWS_REGION ECR_REPOSITORY FUNCTION_NAME BUCKET_NAME; do
+            [ -n "${!v}" ] || { echo "::error::Missing repository variable for $v"; exit 1; }
+          done
+        env:
+          BUCKET_NAME: ${{ vars.BUCKET_NAME }}
+
       - uses: actions/checkout@v4
 
       - uses: aws-actions/configure-aws-credentials@v4
