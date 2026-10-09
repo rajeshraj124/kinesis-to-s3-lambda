@@ -1,0 +1,52 @@
+name: Deploy Lambda
+
+on:
+  push:
+    branches: [main]
+    paths: ["lambda/**", ".github/workflows/deploy.yaml"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        id: image
+        run: |
+          IMAGE="${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          docker build --platform linux/amd64 --provenance=false -t "$IMAGE" lambda/
+          docker push "$IMAGE"
+          echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Update function code
+        run: |
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --image-uri "${{ steps.image.outputs.uri }}"
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+
+      - name: Update environment variables
+        run: |
+          aws lambda update-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --environment "Variables={BUCKET_NAME=${{ vars.BUCKET_NAME }},S3_PREFIX=${{ vars.S3_PREFIX || 'kinesis' }}}"
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
