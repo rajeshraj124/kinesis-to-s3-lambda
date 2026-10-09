@@ -62,7 +62,7 @@ jobs:
           FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           REGION: ${{ vars.AWS_REGION }}
           ROLE_ARN: ${{ secrets.LAMBDA_ROLE_ARN }}
-          KINESIS_STREAM_ARN: ${{ vars.KINESIS_STREAM_ARN }}
+          KINESIS_STREAM_ARN: ${{ secrets.KINESIS_STREAM_ARN }}
           BUCKET_NAME: ${{ vars.BUCKET_NAME }}
           S3_PREFIX: ${{ vars.S3_PREFIX || 'kinesis' }}
         run: |
