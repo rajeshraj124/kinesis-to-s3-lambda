@@ -49,7 +49,7 @@ jobs:
           LATEST_URI="$REGISTRY/$REPOSITORY:latest"
 
           docker build --platform linux/amd64 --provenance=false \
-            -t "$IMAGE_URI" -t "$LATEST_URI" ./app
+            -t "$IMAGE_URI" -t "$LATEST_URI" ./lambda
 
           docker push "$IMAGE_URI"
           docker push "$LATEST_URI"
@@ -64,31 +64,25 @@ jobs:
           ROLE_ARN: ${{ secrets.LAMBDA_ROLE_ARN }}
           KINESIS_STREAM_ARN: ${{ vars.KINESIS_STREAM_ARN }}
           BUCKET_NAME: ${{ vars.BUCKET_NAME }}
-          PREFIX: ${{ vars.PREFIX }}
+          S3_PREFIX: ${{ vars.S3_PREFIX || 'kinesis' }}
         run: |
           set -euo pipefail
-          echo "Checking if Lambda function '$FUNCTION_NAME' exists..."
+          ENV_VARS="Variables={BUCKET_NAME=$BUCKET_NAME,S3_PREFIX=$S3_PREFIX}"
 
           if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" > /dev/null 2>&1; then
             echo "Function exists. Updating code with image: $IMAGE_URI"
             aws lambda update-function-code \
               --function-name "$FUNCTION_NAME" \
               --image-uri "$IMAGE_URI" \
-              --region "$REGION" > /dev/null \
-              --environment Variables="{BUCKET_NAME=$BUCKET_NAME, PREFIX=$PREFIX}"
-
-            aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
-            aws lambda create-event-source-mapping \
-              --function-name "$FUNCTION_NAME" \
-              --event-source-arn "$KINESIS_STREAM_ARN" \
-              --starting-position LATEST \
-              --batch-size 500 \
-              --maximum-batching-window-in-seconds 10 \
-              --bisect-batch-on-function-error \
-              --maximum-retry-attempts 3 \
               --region "$REGION" > /dev/null
+            aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
 
-            echo "Lambda function code updated successfully."
+            aws lambda update-function-configuration \
+              --function-name "$FUNCTION_NAME" \
+              --environment "$ENV_VARS" \
+              --region "$REGION" > /dev/null
+            aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
+            echo "Lambda function updated."
           else
             echo "Function does not exist. Creating with image: $IMAGE_URI"
             aws lambda create-function \
@@ -99,10 +93,9 @@ jobs:
               --timeout 30 \
               --memory-size 256 \
               --architectures x86_64 \
-              --region "$REGION" > /dev/null \
-              --environment Variables="{BUCKET_NAME=$BUCKET_NAME, PREFIX=$PREFIX}" 
-          
-              aws lambda wait function-active-v2 --function-name "$FUNCTION_NAME" --region "$REGION"
+              --environment "$ENV_VARS" \
+              --region "$REGION" > /dev/null
+            aws lambda wait function-active-v2 --function-name "$FUNCTION_NAME" --region "$REGION"
 
             aws lambda create-event-source-mapping \
               --function-name "$FUNCTION_NAME" \
@@ -112,9 +105,6 @@ jobs:
               --maximum-batching-window-in-seconds 10 \
               --bisect-batch-on-function-error \
               --maximum-retry-attempts 3 \
-              --region "$REGION" > /dev/null              
-
-            
+              --region "$REGION" > /dev/null
             echo "Lambda function created and active."
           fi
-          echo "Deployment process completed."
