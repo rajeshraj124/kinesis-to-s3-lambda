@@ -1,60 +1,120 @@
-name: Deploy Lambda
+name: Build, Push, and Deploy Lambda
 
 on:
   push:
-    branches: [main]
-    paths: ["lambda/**", ".github/workflows/deploy.yaml"]
+    branches: ["main"]
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to build and deploy (defaults to commit SHA)"
+        required: false
+        type: string
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write   # Required for requesting the OIDC JWT
+  contents: read    # Required for actions/checkout
 
-env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-  FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+concurrency:
+  group: deploy-lambda
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    name: Deploy Docker Lambda
     runs-on: ubuntu-latest
+
     steps:
-      - name: Validate required variables
-        run: |
-          for v in AWS_REGION ECR_REPOSITORY FUNCTION_NAME BUCKET_NAME; do
-            [ -n "${!v}" ] || { echo "::error::Missing repository variable for $v"; exit 1; }
-          done
-        env:
-          BUCKET_NAME: ${{ vars.BUCKET_NAME }}
+      - name: Checkout Code
+        uses: actions/checkout@v7
 
-      - uses: actions/checkout@v4
-
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
-      - id: ecr
+      - name: Log in to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push image
-        id: image
+      - name: Build, Tag, and Push Docker Image
+        id: build-image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ inputs.image_tag || github.sha }}
         run: |
-          IMAGE="${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
-          docker build --platform linux/amd64 --provenance=false -t "$IMAGE" lambda/
-          docker push "$IMAGE"
-          echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          IMAGE_URI="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+          LATEST_URI="$REGISTRY/$REPOSITORY:latest"
 
-      - name: Update function code
-        run: |
-          aws lambda update-function-code \
-            --function-name "$FUNCTION_NAME" \
-            --image-uri "${{ steps.image.outputs.uri }}"
-          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+          docker build --platform linux/amd64 --provenance=false \
+            -t "$IMAGE_URI" -t "$LATEST_URI" ./app
 
-      - name: Update environment variables
+          docker push "$IMAGE_URI"
+          docker push "$LATEST_URI"
+
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy or Update Lambda Function
+        env:
+          IMAGE_URI: ${{ steps.build-image.outputs.image_uri }}
+          FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+          REGION: ${{ vars.AWS_REGION }}
+          ROLE_ARN: ${{ secrets.LAMBDA_ROLE_ARN }}
+          KINESIS_STREAM_ARN: ${{ vars.KINESIS_STREAM_ARN }}
+          BUCKET_NAME: ${{ vars.BUCKET_NAME }}
+          PREFIX: ${{ vars.PREFIX }}
         run: |
-          aws lambda update-function-configuration \
-            --function-name "$FUNCTION_NAME" \
-            --environment "Variables={BUCKET_NAME=${{ vars.BUCKET_NAME }},S3_PREFIX=${{ vars.S3_PREFIX || 'kinesis' }}}"
-          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+          set -euo pipefail
+          echo "Checking if Lambda function '$FUNCTION_NAME' exists..."
+
+          if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" > /dev/null 2>&1; then
+            echo "Function exists. Updating code with image: $IMAGE_URI"
+            aws lambda update-function-code \
+              --function-name "$FUNCTION_NAME" \
+              --image-uri "$IMAGE_URI" \
+              --region "$REGION" > /dev/null \
+              --environment Variables="{BUCKET_NAME=$BUCKET_NAME, PREFIX=$PREFIX}"
+
+            aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
+            aws lambda create-event-source-mapping \
+              --function-name "$FUNCTION_NAME" \
+              --event-source-arn "$KINESIS_STREAM_ARN" \
+              --starting-position LATEST \
+              --batch-size 500 \
+              --maximum-batching-window-in-seconds 10 \
+              --bisect-batch-on-function-error \
+              --maximum-retry-attempts 3 \
+              --region "$REGION" > /dev/null
+
+            echo "Lambda function code updated successfully."
+          else
+            echo "Function does not exist. Creating with image: $IMAGE_URI"
+            aws lambda create-function \
+              --function-name "$FUNCTION_NAME" \
+              --package-type Image \
+              --code ImageUri="$IMAGE_URI" \
+              --role "$ROLE_ARN" \
+              --timeout 30 \
+              --memory-size 256 \
+              --architectures x86_64 \
+              --region "$REGION" > /dev/null \
+              --environment Variables="{BUCKET_NAME=$BUCKET_NAME, PREFIX=$PREFIX}" 
+          
+              aws lambda wait function-active-v2 --function-name "$FUNCTION_NAME" --region "$REGION"
+
+            aws lambda create-event-source-mapping \
+              --function-name "$FUNCTION_NAME" \
+              --event-source-arn "$KINESIS_STREAM_ARN" \
+              --starting-position LATEST \
+              --batch-size 500 \
+              --maximum-batching-window-in-seconds 10 \
+              --bisect-batch-on-function-error \
+              --maximum-retry-attempts 3 \
+              --region "$REGION" > /dev/null              
+
+            
+            echo "Lambda function created and active."
+          fi
+          echo "Deployment process completed."
