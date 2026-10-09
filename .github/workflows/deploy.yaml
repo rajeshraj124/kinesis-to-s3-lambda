@@ -67,6 +67,9 @@ jobs:
           S3_PREFIX: ${{ vars.S3_PREFIX || 'kinesis' }}
         run: |
           set -euo pipefail
+          for v in FUNCTION_NAME REGION BUCKET_NAME KINESIS_STREAM_ARN ROLE_ARN; do
+            [ -n "${!v}" ] || { echo "::error::Missing value for $v (set the GitHub variable/secret)"; exit 1; }
+          done
           ENV_VARS="Variables={BUCKET_NAME=$BUCKET_NAME,S3_PREFIX=$S3_PREFIX}"
 
           if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" > /dev/null 2>&1; then
@@ -97,6 +100,14 @@ jobs:
               --region "$REGION" > /dev/null
             aws lambda wait function-active-v2 --function-name "$FUNCTION_NAME" --region "$REGION"
 
+            echo "Lambda function created and active."
+          fi
+
+          MAPPINGS=$(aws lambda list-event-source-mappings \
+            --function-name "$FUNCTION_NAME" \
+            --event-source-arn "$KINESIS_STREAM_ARN" \
+            --region "$REGION" --query 'length(EventSourceMappings)' --output text)
+          if [ "$MAPPINGS" = "0" ]; then
             aws lambda create-event-source-mapping \
               --function-name "$FUNCTION_NAME" \
               --event-source-arn "$KINESIS_STREAM_ARN" \
@@ -106,5 +117,7 @@ jobs:
               --bisect-batch-on-function-error \
               --maximum-retry-attempts 3 \
               --region "$REGION" > /dev/null
-            echo "Lambda function created and active."
+            echo "Event source mapping created."
+          else
+            echo "Event source mapping already exists."
           fi
