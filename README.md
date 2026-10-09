@@ -5,7 +5,7 @@ Kinesis stream consumer Lambda that batches records into S3 (JSON Lines).
 ```
 lambda/    handler, Dockerfile, requirements.txt (deployed)
 tests/     unit tests
-events/    sample Kinesis events
+events/    sample Kinesis events 
 ```
 
 Env vars: `BUCKET_NAME` (required), `S3_PREFIX` (default `kinesis`).
