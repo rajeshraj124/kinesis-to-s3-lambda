@@ -1,6 +1,6 @@
 # kinesis-to-s3-lambda
 
-Kinesis stream consumer Lambda that batches records into S3 (JSON Lines).
+Kinesis stream consumer Lambda that batches records into S3 (JSON array).
 
 ```
 lambda/    handler, Dockerfile, requirements.txt (deployed)

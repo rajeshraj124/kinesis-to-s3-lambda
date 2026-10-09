@@ -17,16 +17,21 @@ def lambda_handler(event, context):
     bucket = os.environ["BUCKET_NAME"]
     prefix = os.environ.get("S3_PREFIX", "kinesis")
 
-    lines = []
+    items = []
     for record in event.get("Records", []):
         payload = base64.b64decode(record["kinesis"]["data"]).decode("utf-8")
-        lines.append(payload.strip())
+        items.append(json.loads(payload))
 
-    if not lines:
+    if not items:
         return {"processed": 0}
 
     now = datetime.now(timezone.utc)
-    key = f"{prefix}/{now:%Y/%m/%d/%H}/{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.jsonl"
-    s3.put_object(Bucket=bucket, Key=key, Body="\n".join(lines).encode("utf-8"))
-    logger.info("Wrote %d records to s3://%s/%s", len(lines), bucket, key)
-    return {"processed": len(lines), "key": key}
+    key = f"{prefix}/{now:%Y/%m/%d/%H}/{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex}.json"
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(items, indent=2).encode("utf-8"),
+        ContentType="application/json",
+    )
+    logger.info("Wrote %d records to s3://%s/%s", len(items), bucket, key)
+    return {"processed": len(items), "key": key}
