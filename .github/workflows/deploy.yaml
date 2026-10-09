@@ -67,6 +67,9 @@ jobs:
           KINESIS_STREAM_ARN: ${{ secrets.KINESIS_STREAM_ARN }}
           BUCKET_NAME: ${{ vars.BUCKET_NAME }}
           S3_PREFIX: ${{ vars.S3_PREFIX || 'kinesis' }}
+          BATCH_SIZE: ${{ vars.BATCH_SIZE || '500' }}
+          BATCH_WINDOW: ${{ vars.BATCH_WINDOW || '10' }}
+          MAX_RETRIES: ${{ vars.MAX_RETRIES || '3' }}
         run: |
           set -euo pipefail
           for v in FUNCTION_NAME REGION BUCKET_NAME KINESIS_STREAM_ARN ROLE_ARN; do
@@ -105,21 +108,29 @@ jobs:
             echo "Lambda function created and active."
           fi
 
-          MAPPINGS=$(aws lambda list-event-source-mappings \
+            MAPPING_UUID=$(aws lambda list-event-source-mappings \
             --function-name "$FUNCTION_NAME" \
             --event-source-arn "$KINESIS_STREAM_ARN" \
-            --region "$REGION" --query 'length(EventSourceMappings)' --output text)
-          if [ "$MAPPINGS" = "0" ]; then
+            --region "$REGION" --query 'EventSourceMappings[0].UUID' --output text)
+
+          if [ "$MAPPING_UUID" = "None" ]; then
             aws lambda create-event-source-mapping \
               --function-name "$FUNCTION_NAME" \
               --event-source-arn "$KINESIS_STREAM_ARN" \
               --starting-position LATEST \
-              --batch-size 500 \
-              --maximum-batching-window-in-seconds 10 \
+              --batch-size "$BATCH_SIZE" \
+              --maximum-batching-window-in-seconds "$BATCH_WINDOW" \
               --bisect-batch-on-function-error \
-              --maximum-retry-attempts 3 \
+              --maximum-retry-attempts "$MAX_RETRIES" \
               --region "$REGION" > /dev/null
             echo "Event source mapping created."
           else
-            echo "Event source mapping already exists."
+            aws lambda update-event-source-mapping \
+              --uuid "$MAPPING_UUID" \
+              --batch-size "$BATCH_SIZE" \
+              --maximum-batching-window-in-seconds "$BATCH_WINDOW" \
+              --bisect-batch-on-function-error \
+              --maximum-retry-attempts "$MAX_RETRIES" \
+              --region "$REGION" > /dev/null
+            echo "Event source mapping $MAPPING_UUID updated."
           fi
