@@ -1,0 +1,12 @@
+{
+  "Records": [
+    {
+      "kinesis": {
+        "partitionKey": "key-1",
+        "sequenceNumber": "1",
+        "data": "eyJpZCI6IDEsICJtc2ciOiAiaGVsbG8ifQ=="
+      },
+      "eventSource": "aws:kinesis"
+    }
+  ]
+}
