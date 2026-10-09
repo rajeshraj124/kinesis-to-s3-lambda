@@ -67,8 +67,8 @@ jobs:
           KINESIS_STREAM_ARN: ${{ secrets.KINESIS_STREAM_ARN }}
           BUCKET_NAME: ${{ vars.BUCKET_NAME }}
           S3_PREFIX: ${{ vars.S3_PREFIX || 'kinesis' }}
-          BATCH_SIZE: ${{ vars.BATCH_SIZE || '500' }}
-          BATCH_WINDOW: ${{ vars.BATCH_WINDOW || '10' }}
+          BATCH_SIZE: ${{ vars.BATCH_SIZE || '5000' }}
+          BATCH_WINDOW: ${{ vars.BATCH_WINDOW || '30' }}
           MAX_RETRIES: ${{ vars.MAX_RETRIES || '3' }}
         run: |
           set -euo pipefail
